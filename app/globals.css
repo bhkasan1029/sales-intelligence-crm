@@ -175,19 +175,31 @@ main > :last-child {
 }
 
 /*
- * Custom `--spacing-{sm,md,xs}` above collide with Tailwind's `max-w-{sm,md,xs}`
- * — v4's max-w-* prefers the spacing namespace over --container-*, so those
- * classes were resolving to 8/12/16px and collapsing any container using them
- * (login form, page paragraphs). Restore the container defaults explicitly.
+ * The custom `--spacing-*` scale above collides with `max-w-*`: v4 resolves
+ * max-w-* from the spacing namespace ahead of --container-*, so `max-w-md`
+ * became 16px and collapsed any container using it (login form, paragraphs).
+ *
+ * This can't be fixed with `@utility` — v4 merges a custom utility into the
+ * same rule as the built-in one and emits the theme-derived declaration last,
+ * so it always wins. A plain `@layer utilities` block placed after the import
+ * lands later in the same layer and takes the cascade.
  */
-@utility max-w-xs {
-  max-width: 20rem;
-}
-@utility max-w-sm {
-  max-width: 24rem;
-}
-@utility max-w-md {
-  max-width: 28rem;
+@layer utilities {
+  .max-w-xs {
+    max-width: 20rem;
+  }
+  .max-w-sm {
+    max-width: 24rem;
+  }
+  .max-w-md {
+    max-width: 28rem;
+  }
+  .max-w-lg {
+    max-width: 32rem;
+  }
+  .max-w-xl {
+    max-width: 36rem;
+  }
 }
 
 /* Material Symbols glyphs are text; the class controls the ligature font */
