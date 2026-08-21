@@ -1,75 +1,77 @@
 import { redirect } from "next/navigation";
+import { sql } from "@/lib/db";
 import { getSession, ROLE_HOME } from "@/lib/auth";
+import { formatRelative } from "@/lib/format";
 import ExportButton from "@/components/export-button";
 
-type DummyRule = {
+export const dynamic = "force-dynamic";
+
+type RuleRow = {
   id: string;
   name: string;
-  description: string;
-  scope: "Global" | "Region" | "Branch";
-  trigger: string;
-  action: string;
-  status: "Active" | "Draft" | "Paused";
-  updated: string;
+  description: string | null;
+  condition: Record<string, unknown>;
+  action_type: string;
+  weight: string | number | null;
+  active: boolean;
+  version: number;
+  updated_at: string;
+  pending_count: number;
 };
 
-const RULES: DummyRule[] = [
-  {
-    id: "R-001",
-    name: "Large Deposit Surge",
-    description: "Escalate accounts with deposits > ₹10L in a rolling 24h window.",
-    scope: "Global",
-    trigger: "deposit.amount > 1,000,000 AND window = 24h",
-    action: "Rank task priority: URGENT + notify RM",
-    status: "Active",
-    updated: "2 hrs ago",
-  },
-  {
-    id: "R-002",
-    name: "Dormant High-Value Wake-Up",
-    description: "Detect logins after 60+ days of dormancy on premium accounts.",
-    scope: "Region",
-    trigger: "last_login_gap > 60d AND segment = 'premium'",
-    action: "Queue outreach task + assign to owning RM",
-    status: "Active",
-    updated: "Yesterday",
-  },
-  {
-    id: "R-003",
-    name: "Cross-Sell Signal — Mortgage",
-    description: "Home-related digital activity spikes on liability customers.",
-    scope: "Branch",
-    trigger: "search.category IN ('home_loan') AND has_liability = true",
-    action: "Insert lead in RM pipeline + score = 82",
-    status: "Draft",
-    updated: "3 days ago",
-  },
-  {
-    id: "R-004",
-    name: "Anti-Attrition Watch",
-    description: "Combination of outbound transfers + drop in balance velocity.",
-    scope: "Global",
-    trigger: "outbound_transfer_ratio > 0.6 AND balance_velocity Δ < -20%",
-    action: "Flag account + escalate to BM review",
-    status: "Paused",
-    updated: "Last week",
-  },
-];
+type RequestRow = {
+  id: string;
+  rule_id: string;
+  rule_name: string;
+  requested_by_name: string;
+  proposed_condition: Record<string, unknown>;
+  justification: string;
+  status: "pending" | "approved" | "rejected";
+  created_at: string;
+};
 
-const STATUS_STYLES: Record<DummyRule["status"], string> = {
+const STATUS_STYLES: Record<string, string> = {
   Active: "bg-tertiary-container/40 text-on-tertiary-fixed-variant",
-  Draft: "bg-secondary-container text-on-secondary-container",
   Paused: "bg-error-container text-on-error-container",
+  pending: "bg-secondary-container text-on-secondary-container",
+  approved: "bg-tertiary-container/40 text-on-tertiary-fixed-variant",
+  rejected: "bg-error-container text-on-error-container",
 };
+
+/** JSONB condition rendered as `key op value` pairs the eye can scan. */
+function describeCondition(condition: Record<string, unknown>): string {
+  return Object.entries(condition ?? {})
+    .map(([k, v]) => `${k} = ${typeof v === "object" ? JSON.stringify(v) : String(v)}`)
+    .join(" AND ");
+}
 
 export default async function AdminRulesPage() {
   const session = await getSession();
   if (!session) redirect("/login");
   if (session.role !== "admin") redirect(ROLE_HOME[session.role]);
 
-  const active = RULES.filter((r) => r.status === "Active").length;
-  const drafts = RULES.filter((r) => r.status === "Draft").length;
-  const paused = RULES.filter((r) => r.status === "Paused").length;
+  const [rules, requests] = await Promise.all([
+    sql`
+      SELECT r.id, r.name, r.description, r.condition, r.action_type,
+             r.weight, r.active, r.version, r.updated_at,
+             COUNT(c.id) FILTER (WHERE c.status = 'pending')::int AS pending_count
+      FROM rules r
+      LEFT JOIN rule_change_requests c ON c.rule_id = r.id
+      GROUP BY r.id
+      ORDER BY r.name` as unknown as Promise<RuleRow[]>,
+    sql`
+      SELECT c.id, c.rule_id, r.name AS rule_name, u.name AS requested_by_name,
+             c.proposed_condition, c.justification, c.status, c.created_at
+      FROM rule_change_requests c
+      JOIN rules r ON r.id = c.rule_id
+      JOIN users u ON u.id = c.requested_by
+      ORDER BY (c.status = 'pending') DESC, c.created_at DESC
+      LIMIT 50` as unknown as Promise<RequestRow[]>,
+  ]);
+
+  const active = rules.filter((r) => r.active).length;
+  const paused = rules.length - active;
+  const pending = requests.filter((r) => r.status === "pending").length;
 
   return (
     <div className="flex flex-col w-full px-xl py-xl gap-xl relative">
@@ -96,12 +98,89 @@ export default async function AdminRulesPage() {
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-4 gap-md z-10">
-        <SummaryCard label="Total Rules" value={RULES.length} icon="rule" />
+        <SummaryCard label="Total Rules" value={rules.length} icon="rule" />
         <SummaryCard label="Active" value={active} icon="check_circle" tone="tertiary" />
-        <SummaryCard label="Drafts" value={drafts} icon="edit_note" tone="secondary" />
         <SummaryCard label="Paused" value={paused} icon="pause_circle" tone="error" />
+        <SummaryCard
+          label="Pending Requests"
+          value={pending}
+          icon="inbox"
+          tone="secondary"
+        />
       </div>
 
+      {/* ── Change requests filed by regional heads ─────────────────────── */}
+      <div className="bg-surface-container-lowest rounded-xl border border-outline-variant shadow-sm overflow-hidden z-10">
+        <div className="flex items-center justify-between px-lg py-md border-b border-outline-variant">
+          <div>
+            <h2 className="font-headline-sm text-on-surface">
+              Rule Change Requests
+            </h2>
+            <p className="font-body-sm text-on-surface-variant">
+              Proposed condition deltas from regional heads, newest pending first.
+            </p>
+          </div>
+          {pending > 0 && (
+            <span className="inline-flex items-center px-sm py-xxs rounded-full font-label-uppercase bg-secondary-container text-on-secondary-container">
+              {pending} awaiting review
+            </span>
+          )}
+        </div>
+
+        {requests.length === 0 ? (
+          <div className="px-lg py-xl text-center font-body-md text-on-surface-variant">
+            No change requests filed yet.
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left">
+              <thead className="bg-surface-container-low">
+                <tr className="font-label-uppercase text-on-surface-variant">
+                  <th className="px-lg py-sm">Rule</th>
+                  <th className="px-lg py-sm">Requested by</th>
+                  <th className="px-lg py-sm">Proposed change</th>
+                  <th className="px-lg py-sm">Justification</th>
+                  <th className="px-lg py-sm">Status</th>
+                  <th className="px-lg py-sm">Filed</th>
+                </tr>
+              </thead>
+              <tbody>
+                {requests.map((req) => (
+                  <tr
+                    key={req.id}
+                    className="border-t border-outline-variant hover:bg-surface-container-low/60 transition-colors"
+                  >
+                    <td className="px-lg py-md font-body-md font-semibold text-on-surface">
+                      {req.rule_name}
+                    </td>
+                    <td className="px-lg py-md font-body-sm text-on-surface-variant">
+                      {req.requested_by_name}
+                    </td>
+                    <td className="px-lg py-md font-mono-data text-on-surface-variant max-w-xs">
+                      {describeCondition(req.proposed_condition) || "—"}
+                    </td>
+                    <td className="px-lg py-md font-body-sm text-on-surface-variant max-w-xs">
+                      {req.justification || "—"}
+                    </td>
+                    <td className="px-lg py-md">
+                      <span
+                        className={`inline-flex items-center px-sm py-xxs rounded-full font-label-uppercase ${STATUS_STYLES[req.status]}`}
+                      >
+                        {req.status}
+                      </span>
+                    </td>
+                    <td className="px-lg py-md font-body-sm text-on-surface-variant">
+                      {formatRelative(req.created_at)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* ── Live rules ──────────────────────────────────────────────────── */}
       <div className="bg-surface-container-lowest rounded-xl border border-outline-variant shadow-sm overflow-hidden z-10">
         <div className="flex items-center justify-between px-lg py-md border-b border-outline-variant">
           <div>
@@ -120,7 +199,7 @@ export default async function AdminRulesPage() {
               Filter
             </button>
             <ExportButton
-              rows={RULES as unknown as Record<string, unknown>[]}
+              rows={rules as unknown as Record<string, unknown>[]}
               filename="rules.csv"
               className="font-body-sm text-on-surface-variant hover:text-on-surface px-sm py-xxs rounded-md flex items-center gap-xxs disabled:opacity-50"
             >
@@ -134,50 +213,57 @@ export default async function AdminRulesPage() {
           <table className="w-full text-left">
             <thead className="bg-surface-container-low">
               <tr className="font-label-uppercase text-on-surface-variant">
-                <th className="px-lg py-sm">ID</th>
                 <th className="px-lg py-sm">Rule</th>
-                <th className="px-lg py-sm">Scope</th>
                 <th className="px-lg py-sm">Trigger</th>
                 <th className="px-lg py-sm">Action</th>
+                <th className="px-lg py-sm">Weight</th>
+                <th className="px-lg py-sm">Version</th>
                 <th className="px-lg py-sm">Status</th>
                 <th className="px-lg py-sm">Updated</th>
               </tr>
             </thead>
             <tbody>
-              {RULES.map((rule) => (
+              {rules.map((rule) => (
                 <tr
                   key={rule.id}
                   className="border-t border-outline-variant hover:bg-surface-container-low/60 transition-colors"
                 >
-                  <td className="px-lg py-md font-mono-data text-on-surface-variant">
-                    {rule.id}
-                  </td>
                   <td className="px-lg py-md">
-                    <div className="font-body-md font-semibold text-on-surface">
+                    <div className="font-body-md font-semibold text-on-surface flex items-center gap-xs">
                       {rule.name}
+                      {rule.pending_count > 0 && (
+                        <span className="inline-flex items-center px-xs rounded-full font-label-uppercase bg-secondary-container text-on-secondary-container">
+                          {rule.pending_count} pending
+                        </span>
+                      )}
                     </div>
                     <div className="font-body-sm text-on-surface-variant max-w-md">
-                      {rule.description}
+                      {rule.description ?? "—"}
                     </div>
                   </td>
-                  <td className="px-lg py-md font-body-sm text-on-surface-variant">
-                    {rule.scope}
-                  </td>
                   <td className="px-lg py-md font-mono-data text-on-surface-variant max-w-xs">
-                    {rule.trigger}
+                    {describeCondition(rule.condition) || "—"}
                   </td>
                   <td className="px-lg py-md font-body-sm text-on-surface-variant max-w-xs">
-                    {rule.action}
+                    {rule.action_type}
+                  </td>
+                  <td className="px-lg py-md font-mono-data text-on-surface-variant">
+                    {rule.weight ?? "—"}
+                  </td>
+                  <td className="px-lg py-md font-mono-data text-on-surface-variant">
+                    v{rule.version}
                   </td>
                   <td className="px-lg py-md">
                     <span
-                      className={`inline-flex items-center px-sm py-xxs rounded-full font-label-uppercase ${STATUS_STYLES[rule.status]}`}
+                      className={`inline-flex items-center px-sm py-xxs rounded-full font-label-uppercase ${
+                        rule.active ? STATUS_STYLES.Active : STATUS_STYLES.Paused
+                      }`}
                     >
-                      {rule.status}
+                      {rule.active ? "Active" : "Paused"}
                     </span>
                   </td>
                   <td className="px-lg py-md font-body-sm text-on-surface-variant">
-                    {rule.updated}
+                    {formatRelative(rule.updated_at)}
                   </td>
                 </tr>
               ))}
