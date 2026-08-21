@@ -8,19 +8,46 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Loader2 } from "lucide-react";
 
-const CATEGORIES = [
-  { value: "system_bug", label: "Technical / code bug", hint: "Goes to Admin only" },
-  { value: "rule_dispute", label: "Logical error", hint: "Goes to Admin + Regional Head" },
-] as const;
+export type FeedbackCategory = {
+  value: "system_bug" | "rule_dispute";
+  label: string;
+  hint: string;
+};
 
-export default function FeedbackForm() {
+export const CATEGORY_BUG: FeedbackCategory = {
+  value: "system_bug",
+  label: "Technical / code bug",
+  hint: "Goes to Admin only",
+};
+
+export const CATEGORY_RULE_DISPUTE: FeedbackCategory = {
+  value: "rule_dispute",
+  label: "Logical error",
+  hint: "Goes to Admin + Regional Head",
+};
+
+const CATEGORIES: FeedbackCategory[] = [CATEGORY_BUG, CATEGORY_RULE_DISPUTE];
+
+/**
+ * `categories` narrows what the filer may pick. The Regional Head passes just
+ * [CATEGORY_BUG]: a rule dispute routes *to* them, so there is nobody above
+ * them to dispute a rule with — only a technical bug goes on to Admin.
+ */
+export default function FeedbackForm({
+  categories = CATEGORIES,
+}: {
+  categories?: FeedbackCategory[];
+}) {
   const router = useRouter();
-  const [category, setCategory] = useState<(typeof CATEGORIES)[number]["value"]>("system_bug");
+  const [category, setCategory] = useState<FeedbackCategory["value"]>(
+    categories[0]!.value
+  );
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const activeHint = CATEGORIES.find((c) => c.value === category)?.hint;
+  const activeHint = categories.find((c) => c.value === category)?.hint;
+  const singleCategory = categories.length === 1;
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -49,25 +76,40 @@ export default function FeedbackForm() {
     <form onSubmit={onSubmit} className="rounded-xl border border-gray-200 bg-white p-6 space-y-4">
       <div className="space-y-1.5">
         <Label className="text-[#1A1A1A] font-medium">Category</Label>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-          {CATEGORIES.map((c) => (
-            <button
-              key={c.value}
-              type="button"
-              onClick={() => setCategory(c.value)}
-              className={`text-left px-4 py-3 rounded-lg border transition-colors ${
-                category === c.value
-                  ? "border-[#1A1A1A] bg-[#1A1A1A]/5"
-                  : "border-gray-200 hover:border-gray-300"
-              }`}
-            >
-              <p className="text-sm font-medium text-[#1A1A1A]">{c.label}</p>
-              <p className="text-xs text-gray-500 mt-0.5">{c.hint}</p>
-            </button>
-          ))}
-        </div>
-        {activeHint && (
-          <p className="text-xs text-gray-500 pt-1">Routing: {activeHint}</p>
+        {singleCategory ? (
+          // Nothing to choose between — show what it is instead of a lone
+          // button that looks clickable but can't change anything.
+          <div className="px-4 py-3 rounded-lg border border-gray-200 bg-gray-50">
+            <p className="text-sm font-medium text-[#1A1A1A]">
+              {categories[0]!.label}
+            </p>
+            <p className="text-xs text-gray-500 mt-0.5">
+              {categories[0]!.hint}
+            </p>
+          </div>
+        ) : (
+          <>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+              {categories.map((c) => (
+                <button
+                  key={c.value}
+                  type="button"
+                  onClick={() => setCategory(c.value)}
+                  className={`text-left px-4 py-3 rounded-lg border transition-colors ${
+                    category === c.value
+                      ? "border-[#1A1A1A] bg-[#1A1A1A]/5"
+                      : "border-gray-200 hover:border-gray-300"
+                  }`}
+                >
+                  <p className="text-sm font-medium text-[#1A1A1A]">{c.label}</p>
+                  <p className="text-xs text-gray-500 mt-0.5">{c.hint}</p>
+                </button>
+              ))}
+            </div>
+            {activeHint && (
+              <p className="text-xs text-gray-500 pt-1">Routing: {activeHint}</p>
+            )}
+          </>
         )}
       </div>
 

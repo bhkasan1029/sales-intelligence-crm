@@ -824,3 +824,32 @@ export async function getTeamTickets(
     ORDER BY f.created_at DESC`;
   return rows as TeamTicketRow[];
 }
+
+/**
+ * Every ticket filed anywhere below a regional head — the branch managers who
+ * report to them plus the RMs who report to those branch managers.
+ *
+ * Two levels, so it walks the tree rather than matching manager_id once. Both
+ * categories come back: a rule dispute is routed to Admin *and* the Regional
+ * Head, so filtering to system_bug here would hide exactly the tickets they
+ * are meant to weigh in on.
+ */
+export async function getRegionTickets(
+  regionalHeadId: string
+): Promise<TeamTicketRow[]> {
+  const rows = await sql`
+    WITH RECURSIVE team AS (
+      SELECT id FROM users WHERE manager_id = ${regionalHeadId}
+      UNION ALL
+      SELECT u.id FROM users u JOIN team t ON u.manager_id = t.id
+    )
+    SELECT f.id, f.category, f.subject, f.body, f.status, f.created_at,
+           f.resolved_at,
+           u.id AS author_id, u.name AS author_name,
+           u.avatar_url AS author_avatar
+    FROM feedback f
+    JOIN users u ON u.id = f.author_id
+    WHERE f.author_id IN (SELECT id FROM team)
+    ORDER BY f.created_at DESC`;
+  return rows as TeamTicketRow[];
+}

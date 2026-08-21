@@ -17,7 +17,7 @@ const ROLE_HOME: Record<string, string> = {
   rm: "/RM_dashboard",
   branch_manager: "/BM_dashboard",
   regional_head: "/RH_dashboard",
-  admin: "/rules",
+  admin: "/admin_dashboard/rules",
 };
 
 function LoginForm() {
