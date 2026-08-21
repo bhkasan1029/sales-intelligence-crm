@@ -147,6 +147,22 @@ export async function POST(req: NextRequest) {
          ${d.source_rule_id}, 'open')
       RETURNING *`;
     inserted.push(row);
+
+    // Tell the owner it landed. This is what the header bell reads, so an
+    // action generated while an RM is on another page still reaches them.
+    const [customer] = d.customer_id
+      ? await sql`SELECT name FROM customers WHERE id = ${d.customer_id}`
+      : [];
+    await sql`
+      INSERT INTO notifications (user_id, type, payload)
+      VALUES (${d.rm_id}, ${d.type},
+        ${JSON.stringify({
+          title: d.message,
+          body: customer?.name
+            ? `${customer.name} — ${d.reason ?? "raised by the rules engine"}`
+            : (d.reason ?? "Raised by the rules engine"),
+          action_id: (row as { id: string }).id,
+        })})`;
   }
 
   return NextResponse.json(

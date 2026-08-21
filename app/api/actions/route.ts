@@ -29,7 +29,9 @@ export async function GET(req: NextRequest) {
 
   const rows = rmFilter
     ? await sql`
-        SELECT a.*, c.name AS customer_name, c.mobile AS customer_mobile, c.segment AS customer_segment
+        SELECT a.*, c.name AS customer_name, c.mobile AS customer_mobile,
+               c.email AS customer_email, c.segment AS customer_segment,
+               c.stage AS customer_stage, c.potential_value AS customer_potential_value
         FROM actions a
         LEFT JOIN customers c ON c.id = a.customer_id
         WHERE a.rm_id = ANY(${rmFilter})
@@ -37,7 +39,9 @@ export async function GET(req: NextRequest) {
           AND (${includeSnoozed}::boolean OR (a.status = 'open' AND (a.sla_deadline IS NULL OR a.sla_deadline <= now())))
         ORDER BY a.priority_score DESC, a.created_at DESC`
     : await sql`
-        SELECT a.*, c.name AS customer_name, c.mobile AS customer_mobile, c.segment AS customer_segment
+        SELECT a.*, c.name AS customer_name, c.mobile AS customer_mobile,
+               c.email AS customer_email, c.segment AS customer_segment,
+               c.stage AS customer_stage, c.potential_value AS customer_potential_value
         FROM actions a
         LEFT JOIN customers c ON c.id = a.customer_id
         WHERE (${includeClosed}::boolean OR a.status <> 'done')

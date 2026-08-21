@@ -111,6 +111,22 @@ const RULE_SPECS = [
   ["Special Achievement", "RM crossed 120% of target or has best team conversion", { achievement_pct: 120 }, "ACHIEVEMENT", 0.5],
 ];
 
+/** How long each action type gets before it is due. Mirrors SLA_HOURS in lib/opportunity.ts. */
+const SLA_HOURS = {
+  FOLLOW_UP_BREACH: 4,
+  OPPORTUNITY_AT_RISK: 24,
+  TARGET_GAP: 72,
+  ACHIEVEMENT: 168,
+};
+
+/**
+ * Minutes from now for each open action's deadline, walked in priority order.
+ * Hand-picked rather than random so every RM's dashboard opens with a usable
+ * spread: a couple inside the 30-minute SLA-risk window, a few later today,
+ * and some already breached.
+ */
+const DEADLINE_LADDER_MINUTES = [14, 26, 47, 105, 168, 252, 430, 890, 1500, -55, -320, -1400];
+
 const EVAL_NOTES = {
   2: "Lost most of the month to a system migration on my desk. Two large leads went cold before I could get to them — I need help re-prioritising.",
   3: "HNI leads are taking longer than the 24h SLA allows because of the compliance pre-check. Volume is fine, speed is not.",
@@ -218,9 +234,10 @@ async function main() {
         : createdAt;
       const [a] = await sql`
         INSERT INTO actions (customer_id, rm_id, type, message, reason, priority_score,
-          status, sla_deadline, source_rule_id, created_at, updated_at)
+          status, sla_deadline, snoozed_until, source_rule_id, created_at, updated_at)
         VALUES (${customer?.id ?? null}, ${rm.id}, ${type}, ${message}, ${reason},
           ${priority}, ${closed ? "closed" : "open"},
+          ${closed ? hoursAgo(createdDaysAgo * 24 - SLA_HOURS[type]) : null},
           ${snoozed ? hoursAgo(-between(12, 96)) : null},
           ${ruleIds[type] ?? null}, ${createdAt}, ${updatedAt})
         RETURNING id`;
@@ -274,6 +291,43 @@ async function main() {
         reason: `Gap of ${(expectedPct - achievedPct).toFixed(0)} points exceeds the configured 15-point threshold`,
         priority: between(55, 85), createdDaysAgo: between(1, 5), closed: false, snoozed: false,
       });
+    }
+
+    // ---- deadlines + notifications for whatever is still open ----
+    // The dashboard's countdown, SLA-risk tile and bell all read these, so they
+    // are written once the RM's open queue is known.
+    const openRows = await sql`
+      SELECT a.id, a.type, a.priority_score, c.name AS customer_name
+      FROM actions a
+      LEFT JOIN customers c ON c.id = a.customer_id
+      WHERE a.rm_id = ${rm.id} AND a.status = 'open'
+      ORDER BY a.priority_score DESC, a.created_at DESC`;
+
+    for (let i = 0; i < openRows.length; i++) {
+      const minutes = DEADLINE_LADDER_MINUTES[i % DEADLINE_LADDER_MINUTES.length];
+      await sql`
+        UPDATE actions SET sla_deadline = ${hoursAgo(-minutes / 60)} WHERE id = ${openRows[i].id}`;
+    }
+
+    // Three unread (the badge in the header) and two already-read, newest first.
+    const notifyable = openRows.slice(0, 5);
+    for (let i = 0; i < notifyable.length; i++) {
+      const a = notifyable[i];
+      const subject = a.customer_name ?? "your target";
+      const [type, title, body] =
+        a.type === "TARGET_GAP"
+          ? ["target_gap", "You are behind run-rate", `Run-rate check on ${subject} — open the action queue.`]
+          : a.type === "ACHIEVEMENT"
+            ? ["achievement", "Milestone reached", `You crossed a target milestone on ${subject}.`]
+            : a.type === "OPPORTUNITY_AT_RISK"
+              ? ["opportunity_at_risk", "Pay-in still uninvested", `${subject} has an uninvested pay-in waiting on you.`]
+              : ["sla_risk", "SLA breach risk", `${subject} is approaching its response deadline.`];
+      await sql`
+        INSERT INTO notifications (user_id, type, payload, read_at, created_at)
+        VALUES (${rm.id}, ${type},
+          ${JSON.stringify({ title, body, action_id: a.id })},
+          ${i < 3 ? null : hoursAgo(between(1, 20))},
+          ${hoursAgo(i * 3 + between(1, 3))})`;
     }
 
     // ---- tasks: one per customer that has actions, plus one target task ----

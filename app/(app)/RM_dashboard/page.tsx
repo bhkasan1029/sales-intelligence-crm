@@ -1,22 +1,21 @@
+import { Suspense } from "react";
 import { redirect } from "next/navigation";
 import { getSession, ROLE_HOME } from "@/lib/auth";
-import TasksList from "./tasks-list";
+import { getRmDashboard } from "@/lib/queries/rm";
+import DashboardClient from "./dashboard-client";
 
 export default async function RMDashboardPage() {
   const session = await getSession();
   if (!session) redirect("/login");
   if (session.role !== "rm") redirect(ROLE_HOME[session.role]);
 
-  return (
-    <div className="max-w-6xl mx-auto px-6 py-10">
-      <div className="mb-8">
-        <h2 className="text-2xl font-bold text-[#1A1A1A] mb-1">
-          Welcome back, {session.name.split(" ")[0]}
-        </h2>
-        <p className="text-gray-500">Here&apos;s what needs your attention today.</p>
-      </div>
+  // First paint comes from the server so the queue is on screen before any
+  // client fetch; the board polls from there.
+  const initial = await getRmDashboard(session.user_id);
 
-      <TasksList />
-    </div>
+  return (
+    <Suspense>
+      <DashboardClient initial={initial} />
+    </Suspense>
   );
 }

@@ -2,12 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 import { sql } from "@/lib/db";
 import { getSession } from "@/lib/auth";
 import { closeAction, snoozeAction, type ActionRow, type Outcome } from "@/lib/rules-engine";
+import { periodOf } from "@/lib/format";
 
 /**
  * PATCH /api/actions/[id]
  * Body: { op: 'complete', outcome?: 'converted'|'contacted'|'no_answer'|'not_interested'|'deferred', note?: string }
  *     | { op: 'snooze', hours: number }
  *     | { op: 'reschedule', when: string (ISO datetime) }
+ *     | { op: 'skip', hours?: number }   // dashboard "Skip" — keeps sla_deadline intact
+ *     | { op: 'unskip' }                 // undo a skip
  *
  * Status semantics (aligned with lib/rules-engine.ts):
  *   'open'    → visible in the RM's Tasks list (sla_deadline null or past)
@@ -27,7 +30,13 @@ export async function PATCH(
 
   const { id } = await params;
   const body = await req.json().catch(() => null);
-  const op = body?.op as "complete" | "snooze" | "reschedule" | undefined;
+  const op = body?.op as
+    | "complete"
+    | "snooze"
+    | "reschedule"
+    | "skip"
+    | "unskip"
+    | undefined;
   if (!op) return NextResponse.json({ error: "Missing op" }, { status: 400 });
 
   const [existing] = await sql`SELECT * FROM actions WHERE id = ${id}`;
@@ -78,6 +87,61 @@ export async function PATCH(
       VALUES (${plan.audit.actor_id}, ${plan.audit.action}, ${plan.audit.entity_type},
               ${plan.audit.entity_id}, ${JSON.stringify(plan.audit.before)},
               ${JSON.stringify(plan.audit.after)})`;
+
+    // A conversion is the one outcome that moves money: the customer becomes
+    // active and the deal value lands on this period's target. Without this the
+    // quota tile would never move when an RM actually closes something.
+    let converted_value = 0;
+    if (outcome === "converted" && existing.customer_id) {
+      const [customer] = await sql`
+        UPDATE customers
+        SET stage = 'active', last_contact_at = now()
+        WHERE id = ${existing.customer_id} AND rm_id = ${session.user_id}
+        RETURNING id, potential_value`;
+
+      if (customer) {
+        converted_value = Number(customer.potential_value ?? 0);
+        await sql`
+          INSERT INTO events (type, customer_id, rm_id, payload)
+          VALUES ('CONVERSION_COMPLETED', ${customer.id}, ${session.user_id},
+                  ${JSON.stringify({ action_id: id, amount: converted_value })})`;
+
+        // targets are one row per owner per period; if this period has no row
+        // yet there is nothing to credit and the tile stays at zero.
+        await sql`
+          UPDATE targets
+          SET achieved_value = COALESCE(achieved_value, 0) + ${converted_value}
+          WHERE owner_id = ${session.user_id} AND owner_role = 'rm'
+            AND period = ${periodOf(now)}`;
+      }
+    }
+
+    return NextResponse.json({ ...updated, outcome, converted_value });
+  }
+
+  // ── SKIP / UNSKIP ────────────────────────────────────────────────────────
+  // The dashboard's Skip button. Unlike 'snooze' this leaves status='open' and
+  // sla_deadline untouched — the SLA clock keeps running while the card is out
+  // of the queue, which is what makes "Undo" meaningful.
+  if (op === "skip" || op === "unskip") {
+    const hours = op === "skip" ? Number(body.hours ?? 4) : 0;
+    if (op === "skip" && (!Number.isFinite(hours) || hours <= 0 || hours > 24 * 7)) {
+      return NextResponse.json({ error: "hours must be 1–168" }, { status: 400 });
+    }
+    const until =
+      op === "skip" ? new Date(now.getTime() + hours * 3_600_000).toISOString() : null;
+
+    const [updated] = await sql`
+      UPDATE actions
+      SET snoozed_until = ${until}, updated_at = now()
+      WHERE id = ${id} RETURNING *`;
+
+    await sql`
+      INSERT INTO audit_log (actor_id, action, entity_type, entity_id, before, after)
+      VALUES (${session.user_id}, ${op === "skip" ? "action.skip" : "action.unskip"},
+              'actions', ${id},
+              ${JSON.stringify({ snoozed_until: existing.snoozed_until ?? null })},
+              ${JSON.stringify({ snoozed_until: until })})`;
 
     return NextResponse.json(updated);
   }

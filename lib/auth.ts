@@ -1,21 +1,19 @@
 import { SignJWT, jwtVerify } from "jose";
 import { cookies } from "next/headers";
+import { ROLE_HOME, type Role } from "@/lib/roles";
 
 const secret = new TextEncoder().encode(process.env.JWT_SECRET!);
 
-export type Role = "rm" | "branch_manager" | "regional_head" | "admin";
+// Re-exported so existing server-side imports keep working; client components
+// must import them from lib/roles.ts instead — this module touches next/headers.
+export { ROLE_HOME };
+export type { Role };
+
 export type Session = {
   user_id: string;
   role: Role;
   team_id: string | null;
   name: string;
-};
-
-export const ROLE_HOME: Record<Role, string> = {
-  rm: "/RM_dashboard",
-  branch_manager: "/BM_dashboard",
-  regional_head: "/RH_dashboard",
-  admin: "/rules",
 };
 
 export async function signToken(payload: Session) {

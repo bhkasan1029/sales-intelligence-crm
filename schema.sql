@@ -62,7 +62,11 @@ CREATE TABLE actions (
   reason TEXT,
   priority_score NUMERIC DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'open',
+  -- When this action is due. The RM dashboard counts down against it, so it is
+  -- never overwritten by a skip — see snoozed_until.
   sla_deadline TIMESTAMPTZ,
+  -- Set by "Skip": the row stays open but drops out of the queue until then.
+  snoozed_until TIMESTAMPTZ,
   source_event_id UUID REFERENCES events(id),
   source_rule_id UUID REFERENCES rules(id),
   created_at TIMESTAMPTZ DEFAULT now(),
