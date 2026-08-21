@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { sql } from "@/lib/db";
 import { getSession } from "@/lib/auth";
-import { closeAction, snoozeAction, type ActionRow, type Outcome } from "@/lib/rules-engine";
+import { closeAction, snoozeAction, reassignAction, type ActionRow, type Outcome } from "@/lib/rules-engine";
 import { periodOf } from "@/lib/format";
 
 /**
@@ -11,12 +11,17 @@ import { periodOf } from "@/lib/format";
  *     | { op: 'reschedule', when: string (ISO datetime) }
  *     | { op: 'skip', hours?: number }   // dashboard "Skip" — keeps sla_deadline intact
  *     | { op: 'unskip' }                 // undo a skip
+ *     | { op: 'reassign', to_rm_id: string }
  *
  * Status semantics (aligned with lib/rules-engine.ts):
  *   'open'    → visible in the RM's Tasks list (sla_deadline null or past)
  *   'snoozed' → user paused; hidden until sla_deadline passes
  *   'done'    → completed; excluded from the engine's dedupe pool so a fresh
  *               trigger can re-flag the same customer/rule combo later
+ *
+ * Op-level auth:
+ *   - complete / snooze / reschedule / skip / unskip: the assigned RM only.
+ *   - reassign: managers (branch_manager, regional_head) and admin.
  */
 export async function PATCH(
   req: NextRequest,
@@ -24,9 +29,6 @@ export async function PATCH(
 ) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (session.role !== "rm") {
-    return NextResponse.json({ error: "Only RMs can update their actions" }, { status: 403 });
-  }
 
   const { id } = await params;
   const body = await req.json().catch(() => null);
@@ -36,13 +38,25 @@ export async function PATCH(
     | "reschedule"
     | "skip"
     | "unskip"
+    | "reassign"
     | undefined;
   if (!op) return NextResponse.json({ error: "Missing op" }, { status: 400 });
 
   const [existing] = await sql`SELECT * FROM actions WHERE id = ${id}`;
   if (!existing) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  if (existing.rm_id !== session.user_id) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+
+  const isManager =
+    session.role === "branch_manager" || session.role === "regional_head" || session.role === "admin";
+
+  if (op === "reassign") {
+    if (!isManager) return NextResponse.json({ error: "Managers only" }, { status: 403 });
+  } else {
+    if (session.role !== "rm") {
+      return NextResponse.json({ error: "Only RMs can update their actions" }, { status: 403 });
+    }
+    if (existing.rm_id !== session.user_id) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
   }
 
   const now = new Date();
@@ -191,6 +205,41 @@ export async function PATCH(
       SET sla_deadline = ${dt.toISOString()}, updated_at = now()
       WHERE id = ${id} RETURNING *`;
     return NextResponse.json(row);
+  }
+
+  // ── REASSIGN ─────────────────────────────────────────────────────────────
+  // Manager hands an action off to a different RM. Uses engine.reassignAction()
+  // to produce the update + audit row; the target RM keeps the same dedupe
+  // slot (same source_rule_id, new rm_id) so the engine won't re-fire on them.
+  if (op === "reassign") {
+    const to_rm_id = body?.to_rm_id as string | undefined;
+    if (!to_rm_id) return NextResponse.json({ error: "to_rm_id required" }, { status: 400 });
+    if (to_rm_id === existing.rm_id) {
+      return NextResponse.json({ error: "Already assigned to that RM" }, { status: 400 });
+    }
+
+    const [target] = await sql`SELECT id, role FROM users WHERE id = ${to_rm_id}`;
+    if (!target) return NextResponse.json({ error: "Target RM not found" }, { status: 404 });
+    if (target.role !== "rm") {
+      return NextResponse.json({ error: "Target must be an RM" }, { status: 400 });
+    }
+
+    const plan = reassignAction(existing as unknown as ActionRow, to_rm_id, session.user_id, now);
+
+    const [updated] = await sql`
+      UPDATE actions
+      SET rm_id = ${plan.actionUpdate.rm_id},
+          updated_at = ${plan.actionUpdate.updated_at}
+      WHERE id = ${plan.actionUpdate.id}
+      RETURNING *`;
+
+    await sql`
+      INSERT INTO audit_log (actor_id, action, entity_type, entity_id, before, after)
+      VALUES (${plan.audit.actor_id}, ${plan.audit.action}, ${plan.audit.entity_type},
+              ${plan.audit.entity_id}, ${JSON.stringify(plan.audit.before)},
+              ${JSON.stringify(plan.audit.after)})`;
+
+    return NextResponse.json(updated);
   }
 
   return NextResponse.json({ error: "Unknown op" }, { status: 400 });
