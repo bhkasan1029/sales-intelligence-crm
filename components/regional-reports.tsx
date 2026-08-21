@@ -55,9 +55,9 @@ type Client = {
   id: string;
   name: string;
   branch: string;
-  /** Millions USD. */
+  /** Millions ₹. */
   aum: number;
-  /** Millions USD sitting idle. */
+  /** Millions ₹ sitting idle. */
   idle: number;
   rm: string;
   risk: Risk;
@@ -268,7 +268,7 @@ export default function RegionalReports() {
               onChange={onFilterChange((v: string) => setMinAum(Number(v)))}
               options={AUM_FILTERS.map((n) => ({
                 value: String(n),
-                label: `AUM > $${n}M`,
+                label: `AUM > ₹${n}M`,
               }))}
               divider
             />
@@ -278,7 +278,7 @@ export default function RegionalReports() {
               onChange={onFilterChange((v: string) => setMinIdle(Number(v)))}
               options={IDLE_FILTERS.map((n) => ({
                 value: String(n),
-                label: `Idle > $${n}M`,
+                label: `Idle > ₹${n}M`,
               }))}
             />
           </div>
@@ -524,12 +524,12 @@ function ClientRow({ client }: { client: Client }) {
       </td>
       <td className="p-md font-body-md text-on-surface">{client.branch}</td>
       <td className="p-md font-mono-data text-on-surface font-semibold">
-        ${client.aum.toFixed(1)}M
+        ₹{client.aum.toFixed(1)}M
       </td>
       <td className="p-md font-mono-data text-on-surface">
         {idleAlert ? (
           <div className="flex items-center gap-xs">
-            <span className="text-tertiary">${client.idle.toFixed(1)}M</span>
+            <span className="text-tertiary">₹{client.idle.toFixed(1)}M</span>
             <span
               className="material-symbols-outlined text-[14px] text-tertiary"
               title="Idle capital above threshold"
@@ -538,7 +538,7 @@ function ClientRow({ client }: { client: Client }) {
             </span>
           </div>
         ) : (
-          `$${client.idle.toFixed(1)}M`
+          `₹${client.idle.toFixed(1)}M`
         )}
       </td>
       <td className="p-md">

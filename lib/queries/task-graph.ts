@@ -44,16 +44,21 @@ const ACTION_COLORS: Record<string, string> = {
 };
 
 /**
- * Bipartite action↔task graph for a branch, plus the minimum-cover set of
- * tasks (greedy) that clears every open action. Everything is scoped by the
- * caller's manager_id inside SQL — no per-row JS filter afterwards.
+ * Bipartite action↔task graph for a scope (either a whole branch or a
+ * single RM), plus the greedy minimum-cover set of tasks that clears every
+ * open action. Scoping happens inside SQL — no per-row JS filter afterwards.
  */
-export async function getBranchTaskGraph(
-  bmId: string,
+export async function getTaskGraph(
+  scope: { bmId: string } | { rmId: string },
 ): Promise<TaskGraphResult> {
-  const rmRows = await sql`
-    SELECT id FROM users WHERE manager_id = ${bmId} AND role = 'rm'`;
-  const rmIds = rmRows.map((r) => r.id as string);
+  let rmIds: string[];
+  if ("bmId" in scope) {
+    const rmRows = await sql`
+      SELECT id FROM users WHERE manager_id = ${scope.bmId} AND role = 'rm'`;
+    rmIds = rmRows.map((r) => r.id as string);
+  } else {
+    rmIds = [scope.rmId];
+  }
 
   if (rmIds.length === 0) {
     return {
@@ -153,3 +158,6 @@ export async function getBranchTaskGraph(
     },
   };
 }
+
+/** Convenience wrapper — old name preserved for callers already wired to it. */
+export const getBranchTaskGraph = (bmId: string) => getTaskGraph({ bmId });

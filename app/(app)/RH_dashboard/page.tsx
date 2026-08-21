@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { getSession, ROLE_HOME } from "@/lib/auth";
+import ExportButton from "@/components/export-button";
 
 /**
  * Branches Overview — the Regional Head's home.
@@ -12,8 +13,8 @@ import { getSession, ROLE_HOME } from "@/lib/auth";
 const REGION = {
   name: "Western Region",
   branchCount: 12,
-  achievedValue: "$14.2M",
-  targetValue: "$18.5M",
+  achievedValue: "₹14.2M",
+  targetValue: "₹18.5M",
   quotaPct: 76,
   yoyDeltaPct: 4.2,
   ahead: 7,
@@ -34,12 +35,12 @@ type BranchRow = {
 };
 
 const BRANCHES: BranchRow[] = [
-  { id: "b1", name: "Downtown LA", quotaPct: 112, conversionPct: 34.2, pipelineValue: "$2.45M", breaches: 0, tone: "ahead" },
-  { id: "b2", name: "San Francisco North", quotaPct: 108, conversionPct: 31.8, pipelineValue: "$3.10M", breaches: 1, tone: "ahead" },
-  { id: "b3", name: "Seattle Metro", quotaPct: 94, conversionPct: 28.5, pipelineValue: "$1.85M", breaches: 3, tone: "ontrack" },
-  { id: "b4", name: "Portland East", quotaPct: 88, conversionPct: 24.1, pipelineValue: "$1.20M", breaches: 2, tone: "ontrack" },
-  { id: "b5", name: "Vegas Strip", quotaPct: 62, conversionPct: 18.4, pipelineValue: "$0.85M", breaches: 12, tone: "lag" },
-  { id: "b6", name: "San Diego South", quotaPct: 104, conversionPct: 30.1, pipelineValue: "$2.15M", breaches: 0, tone: "ahead" },
+  { id: "b1", name: "Downtown LA", quotaPct: 112, conversionPct: 34.2, pipelineValue: "₹2.45M", breaches: 0, tone: "ahead" },
+  { id: "b2", name: "San Francisco North", quotaPct: 108, conversionPct: 31.8, pipelineValue: "₹3.10M", breaches: 1, tone: "ahead" },
+  { id: "b3", name: "Seattle Metro", quotaPct: 94, conversionPct: 28.5, pipelineValue: "₹1.85M", breaches: 3, tone: "ontrack" },
+  { id: "b4", name: "Portland East", quotaPct: 88, conversionPct: 24.1, pipelineValue: "₹1.20M", breaches: 2, tone: "ontrack" },
+  { id: "b5", name: "Vegas Strip", quotaPct: 62, conversionPct: 18.4, pipelineValue: "₹0.85M", breaches: 12, tone: "lag" },
+  { id: "b6", name: "San Diego South", quotaPct: 104, conversionPct: 30.1, pipelineValue: "₹2.15M", breaches: 0, tone: "ahead" },
 ];
 
 export default async function RHDashboardPage() {
@@ -198,12 +199,16 @@ export default async function RHDashboardPage() {
               </span>
               Filter
             </button>
-            <button className="flex items-center gap-xs bg-primary hover:bg-primary/90 text-on-primary px-md py-xs rounded-lg transition-colors font-body-sm font-semibold shadow-sm">
+            <ExportButton
+              rows={BRANCHES as unknown as Record<string, unknown>[]}
+              filename="branches.csv"
+              className="flex items-center gap-xs bg-primary hover:bg-primary/90 text-on-primary px-md py-xs rounded-lg transition-colors font-body-sm font-semibold shadow-sm disabled:opacity-50"
+            >
               <span className="material-symbols-outlined text-[18px]">
                 download
               </span>
               Export
-            </button>
+            </ExportButton>
           </div>
         </div>
 

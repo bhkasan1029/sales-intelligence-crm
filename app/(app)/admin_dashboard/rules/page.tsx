@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { getSession, ROLE_HOME } from "@/lib/auth";
+import ExportButton from "@/components/export-button";
 
 type DummyRule = {
   id: string;
@@ -118,13 +119,14 @@ export default async function AdminRulesPage() {
               <span className="material-symbols-outlined text-[16px]">filter_list</span>
               Filter
             </button>
-            <button
-              type="button"
-              className="font-body-sm text-on-surface-variant hover:text-on-surface px-sm py-xxs rounded-md flex items-center gap-xxs"
+            <ExportButton
+              rows={RULES as unknown as Record<string, unknown>[]}
+              filename="rules.csv"
+              className="font-body-sm text-on-surface-variant hover:text-on-surface px-sm py-xxs rounded-md flex items-center gap-xxs disabled:opacity-50"
             >
               <span className="material-symbols-outlined text-[16px]">download</span>
               Export
-            </button>
+            </ExportButton>
           </div>
         </div>
 

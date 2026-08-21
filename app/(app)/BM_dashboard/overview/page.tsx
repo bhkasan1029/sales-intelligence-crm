@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getSession, ROLE_HOME } from "@/lib/auth";
+import ExportButton from "@/components/export-button";
 import {
   getBranchIntelligence,
   getBranchRunRate,
@@ -258,10 +259,14 @@ function TopClientsCard({ clients }: { clients: BranchTopClient[] }) {
             Top 5 entities by current period volume
           </p>
         </div>
-        <button className="inline-flex items-center gap-xs px-md py-sm bg-surface-container-high hover:bg-surface-container-highest text-on-surface-variant font-headline-sm rounded-lg transition-colors shadow-sm text-body-sm">
+        <ExportButton
+          rows={clients as unknown as Record<string, unknown>[]}
+          filename="top-clients.csv"
+          className="inline-flex items-center gap-xs px-md py-sm bg-surface-container-high hover:bg-surface-container-highest text-on-surface-variant font-headline-sm rounded-lg transition-colors shadow-sm text-body-sm disabled:opacity-50"
+        >
           <span className="material-symbols-outlined text-[18px]">download</span>
           Export
-        </button>
+        </ExportButton>
       </div>
 
       {clients.length === 0 ? (

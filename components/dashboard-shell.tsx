@@ -54,14 +54,8 @@ const NAV_BY_ROLE: Record<Role, NavItem[]> = {
       activePrefixes: ["/BM_dashboard/rm"],
     },
     { label: "Reports & Analytics", href: "/BM_dashboard/overview", icon: "analytics" },
-    // Raised tickets still exists at /BM_dashboard/feedback; it hangs off
-    // Support rather than the sidebar.
-    {
-      label: "Support",
-      href: "/BM_dashboard/support",
-      icon: "support_agent",
-      activePrefixes: ["/BM_dashboard/feedback"],
-    },
+    { label: "Raised Tickets", href: "/BM_dashboard/feedback", icon: "confirmation_number" },
+    { label: "Support", href: "/BM_dashboard/support", icon: "support_agent" },
   ],
   regional_head: [
     { label: "Branches Overview", href: "/RH_dashboard", icon: "account_tree" },

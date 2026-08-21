@@ -807,6 +807,7 @@ export type TeamTicketRow = FeedbackRow & {
   author_id: string;
   author_name: string;
   author_avatar: string | null;
+  author_role: string;
 };
 
 /** Every ticket filed by an RM who reports to this branch manager. */
@@ -817,7 +818,7 @@ export async function getTeamTickets(
     SELECT f.id, f.category, f.subject, f.body, f.status, f.created_at,
            f.resolved_at,
            u.id AS author_id, u.name AS author_name,
-           u.avatar_url AS author_avatar
+           u.avatar_url AS author_avatar, u.role AS author_role
     FROM feedback f
     JOIN users u ON u.id = f.author_id
     WHERE u.manager_id = ${managerId}
@@ -846,10 +847,27 @@ export async function getRegionTickets(
     SELECT f.id, f.category, f.subject, f.body, f.status, f.created_at,
            f.resolved_at,
            u.id AS author_id, u.name AS author_name,
-           u.avatar_url AS author_avatar
+           u.avatar_url AS author_avatar, u.role AS author_role
     FROM feedback f
     JOIN users u ON u.id = f.author_id
     WHERE f.author_id IN (SELECT id FROM team)
+    ORDER BY f.created_at DESC`;
+  return rows as TeamTicketRow[];
+}
+
+/**
+ * Every ticket in the system, regardless of who raised it. Admin-only.
+ * Includes tickets from RMs, branch managers and regional heads — the platform
+ * team is the terminal recipient for all of them.
+ */
+export async function getAllTickets(): Promise<TeamTicketRow[]> {
+  const rows = await sql`
+    SELECT f.id, f.category, f.subject, f.body, f.status, f.created_at,
+           f.resolved_at,
+           u.id AS author_id, u.name AS author_name,
+           u.avatar_url AS author_avatar, u.role AS author_role
+    FROM feedback f
+    JOIN users u ON u.id = f.author_id
     ORDER BY f.created_at DESC`;
   return rows as TeamTicketRow[];
 }

@@ -16,7 +16,33 @@ export type Ticket = {
   resolved_at: string | null;
   author_name: string;
   author_avatar: string | null;
+  /** DB role of the author — only set for callers that mix roles (admin). */
+  author_role?: string | null;
 };
+
+/** Short display for the author's role, and a colour class for the chip. */
+const ROLE_CHIP: Record<string, { label: string; className: string }> = {
+  rm: { label: "RM", className: "bg-primary/10 text-primary" },
+  branch_manager: {
+    label: "BM",
+    className: "bg-tertiary/10 text-tertiary",
+  },
+  regional_head: {
+    label: "RH",
+    className: "bg-secondary-container text-on-secondary-container",
+  },
+  admin: {
+    label: "Admin",
+    className: "bg-error-container text-on-error-container",
+  },
+};
+
+const ROLE_FILTERS = [
+  { value: "all", label: "All" },
+  { value: "rm", label: "RM" },
+  { value: "branch_manager", label: "BM" },
+  { value: "regional_head", label: "RH" },
+];
 
 const PAGE_SIZE = 8;
 
@@ -82,10 +108,16 @@ export default function TicketsTable({ tickets }: { tickets: Ticket[] }) {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("all");
   const [priority, setPriority] = useState("all");
+  const [role, setRole] = useState("all");
   const [filterOpen, setFilterOpen] = useState(false);
   const [view, setView] = useState<"list" | "grid">("list");
   const [page, setPage] = useState(1);
   const [expanded, setExpanded] = useState<string | null>(null);
+
+  /** Tickets carry an author_role only when the caller feeds a mixed-role set
+   *  (the admin's global view). BM/RH pages leave it null and the chip/filter
+   *  stay hidden. */
+  const showRoles = tickets.some((t) => t.author_role);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -94,6 +126,7 @@ export default function TicketsTable({ tickets }: { tickets: Ticket[] }) {
       if (priority !== "all" && priorityOf(t.category) !== priority) {
         return false;
       }
+      if (role !== "all" && t.author_role !== role) return false;
       if (!q) return true;
       return (
         t.code.toLowerCase().includes(q) ||
@@ -107,7 +140,7 @@ export default function TicketsTable({ tickets }: { tickets: Ticket[] }) {
           .includes(q)
       );
     });
-  }, [tickets, query, status, priority]);
+  }, [tickets, query, status, priority, role]);
 
   const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   // A filter change can leave `page` past the end — clamp on read rather than
@@ -116,7 +149,8 @@ export default function TicketsTable({ tickets }: { tickets: Ticket[] }) {
   const start = (current - 1) * PAGE_SIZE;
   const visible = filtered.slice(start, start + PAGE_SIZE);
 
-  const filtersActive = status !== "all" || priority !== "all";
+  const filtersActive =
+    status !== "all" || priority !== "all" || role !== "all";
 
   const reset = () => {
     setPage(1);
@@ -182,11 +216,23 @@ export default function TicketsTable({ tickets }: { tickets: Ticket[] }) {
                   reset();
                 }}
               />
+              {showRoles && (
+                <FilterGroup
+                  title="Raised by"
+                  options={ROLE_FILTERS}
+                  value={role}
+                  onChange={(v) => {
+                    setRole(v);
+                    reset();
+                  }}
+                />
+              )}
               <div className="flex justify-between items-center pt-xs border-t border-outline-variant">
                 <button
                   onClick={() => {
                     setStatus("all");
                     setPriority("all");
+                    setRole("all");
                     reset();
                   }}
                   className="font-body-sm text-on-surface-variant hover:text-on-surface transition-colors"
@@ -382,6 +428,7 @@ function TicketRow({
             <span className="font-semibold text-on-surface whitespace-nowrap">
               {ticket.author_name}
             </span>
+            <RoleChip role={ticket.author_role} />
           </div>
         </td>
         <td className="py-xs px-md">
@@ -496,6 +543,7 @@ function TicketCard({ ticket, index }: { ticket: Ticket; index: number }) {
           <span className="font-body-sm text-on-surface truncate">
             {ticket.author_name}
           </span>
+          <RoleChip role={ticket.author_role} />
         </div>
         <span className={cn("flex items-center gap-xxs font-body-sm", status.tone)}>
           <span
@@ -539,6 +587,22 @@ function PriorityBadge({ priority }: { priority: Priority }) {
       <span className="w-1.5 h-1.5 rounded-full bg-outline"></span>
       {PRIORITY_LABEL.low}
     </div>
+  );
+}
+
+function RoleChip({ role }: { role?: string | null }) {
+  if (!role) return null;
+  const meta = ROLE_CHIP[role];
+  if (!meta) return null;
+  return (
+    <span
+      className={cn(
+        "shrink-0 inline-flex items-center px-xs py-[1px] rounded-md font-label-uppercase",
+        meta.className
+      )}
+    >
+      {meta.label}
+    </span>
   );
 }
 
